@@ -1,0 +1,331 @@
+\documentclass{article}
+
+% if you need to pass options to natbib, use, e.g.:
+% \PassOptionsToPackage{numbers, compress}{natbib}
+% before loading neurips_2023
+
+% ready for submission
+\usepackage[final]{neurips_2023}
+
+% to avoid loading the natbib package, add option nonatbib:
+% \usepackage[nonatbib]{neurips_2023}
+
+\usepackage{silence}
+\WarningFilter{latex}{Command \showhyphens has changed}
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage[table]{xcolor}  
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{wrapfig}
+\usepackage{siunitx}
+\usepackage{amsmath}
+\usepackage{tabularx}
+\usepackage{makecell}
+\usepackage{listings}
+\usepackage{enumitem}
+\usepackage{multirow}
+\usepackage{xltabular}
+
+\graphicspath{{images}}
+
+\title{Task 4: Data Classification}
+\author{% 
+  Team Vectorized Engines \AND
+  Simon Grundner (k12136610)
+  \And
+  Mihael Zupanic (k12416041)
+}
+
+
+\begin{document}
+
+\maketitle
+
+\section{Dataset Preparation}
+\subsection{Label Aggregation}
+
+We aggregate the annotation array [T, C, A] into a binary label matrix [T, C] using the \emph{get\_features\_and\_targets} function from the tutorial. The function first binarizes the overlap fractions with (annotations > 0).astype(int), so any nonzero overlap counts as a yes vote from that annotator.
+
+The votes are then summed along the annotator axis and thresholded with \emph{votes > (A // 2)}, where A is the number of annotators in the file. This requires a strict majority — for A=2 both annotators must agree, for A=1 that single vote decides, and for higher A more than half must agree. We use the "multilabel" mode because multiple sound events can overlap in the same segment.
+
+Counting any overlap as a yes vote is forgiving on segment boundaries, which matters since sound events rarely line up perfectly with the 1 second windows. The majority vote filters out individual annotator mistakes, like the missing keyboard\_typing we found in 000278.wav in the previous task.
+
+We are biased towards false negatives — on two-annotator files a single disagreement drops the label, which especially hurts classes with low Jaccard agreement like door\_open\_close (52.3\%) and wardrobe\_drawer\_open\_close (51.9\%) (as seen in Task 3 of the project). Around 17\% of files only have one annotator, so their labels are never checked. Binarizing also throws away the overlap fraction — 5\% overlap and 95\% overlap end up treated the same.
+
+An alternative would be taking the union of annotators, but that would just swap our false negatives for false positives. One could also weight the confidence in the annotator, for example if one of the annotators is also the author, we could choose to trust the author upon disagreement.
+
+\subsection{Data Split}\label{sec:data-split}
+
+(i) Verbatim to the description of data leakage in the tutorial: \emph{``Data leakage occurs when a model has access to information during training that would not be available at prediction time, leading to overly optimistic performance.''}
+Consecutive frames have similar feature characteristics (high correlation), if these consecutive samples land in the validation and training data, we will get a misleadingly high performance for the training of the model, although it performs poorly on new or unseen data.
+
+Originally the data is split randomly using the \emph{train\_test\_split()} method, for which data leakage is likely to occur. This is then improved, by selecting a whole adjacent section of the feature data array. This mitigates the information leakage effect, but still a large portion of our data is used for validation and not training.
+
+To get a higher training effect from the data which is not used for testing, $k$-fold cross validation is used. This method sections the data which is not used for testing into $k$ equal sets, and selects one as the validation set and the others as training sets. This is done $k$ times while each iteration uses another validation set. Finally, the performance is averaged from iterations.
+
+(ii) Equal class distribution is crucial, because a training set, which largely consists of a class which is not present in the validation set at all, would bring down performance. To ensure the classes are equally distributed across the $k$ different data splits, a method called \emph{stratified} $k$-fold cross validation is used \cite{k-fold}. A comparison of how the data is split can be seen in \autoref{fig:k-fold}. The method is later used implicitly by the builtin sklearn evaluation methods. The final split of the data is $90\%$ training + cross validation data and $10\%$ test data.
+
+\begin{figure}[htb]
+    \centering
+    \begin{subfigure}[t]{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/k-fold.png}
+        \caption{Normal $k$-fold CV data splitting}
+    \end{subfigure}%
+    \hfill
+    \begin{subfigure}[t]{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/sk-fold.png}
+        \caption{Stratified $k$-fold CV data splitting}
+    \end{subfigure}
+    \caption{Comparison on equal data sectioning versus sectioning based on class frequency (stratified $k$-fold). Taken from the sklearn documentation.}\label{fig:k-fold}
+\end{figure}
+
+\subsection{Preprocessing}
+
+Loudness or energy can vary between audio files, so normalizing these features might help. The simplest way to standardize the features, is by removing the mean and scaling them to unit variance. This can be achieved by applying the \emph{StandarScaler} from the sklearn. It is important that the same pre processing has to be applied when using the classifier in action.
+
+% A small anticipation: The normalization of data did not seem to have an impact on tree based models, as the scores of the later defined random tree classifier did not change noticeably.
+
+\section{Evaluation}
+
+\subsection{Evaluation Criterion}
+
+In this case, the classification scenario is a multi-label classification, since there could be multiple annotations per audio segment, if two sounds events overlap. From the previous task (Task 3) one could see, that the classes are strongly imbalanced. To evaluate the performance of a classifier, a list of metrics shown in \autoref{tab:metrics} can be taken into account.
+
+\begin{xltabular}{\linewidth}{llX}
+\caption{Reasoning on the chosen evaluation criterion}
+\label{tab:metrics}\\
+\toprule
+Metric & Category & Details \\
+\midrule
+\endfirsthead
+\caption[]{Reasoning on the chosen evaluation criterion (continued)}\\
+\toprule
+Metric & Category & Details \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+
+\textbf{Accuracy}
+& Description      & \% of correct predictions. \\
+& When it's useful & Simple, but \emph{misleading with imbalanced data}. \\
+& Viable metric?   & \textbf{No}, because the classes are strongly imbalanced. \textbf{Yes} for \emph{balanced} accuracy. \\
+\midrule
+\textbf{Precision}
+& Description      & How many predicted positives were correct. \\
+& When it's useful & Important when \emph{false positives} are costly (e.g., spam filters). \\
+& Viable metric?   & \textbf{No}, a high precision model prefers to predict more negatives overall and only classifies a label as true if the event is very likely (high threshold). Infrequent classes will be predicted even more rarely. \\
+\midrule
+\textbf{Recall}
+& Description      & How many actual positives were caught. \\
+& When it's useful & Critical when \emph{false negatives} are costly (e.g., medical diagnosis). \\
+& Viable metric?   & \textbf{No}, prefers to predict more positives overall, implying more false positives (low threshold). Especially for multi-label classification it would be very likely for multiple false positives at once. \\
+\midrule
+\textbf{F1 Score}
+& Description      & Harmonic mean of precision and recall. \\
+& When it's useful & Good balance when classes are imbalanced. \\
+& Viable metric?   & \textbf{Yes}, a balanced threshold is preferable here. On one hand we do not want the audio event detection to classify \emph{everything} as a label, but neither no events at all. \\
+\midrule
+\textbf{ROC AUC}
+& Description      & Measures ranking ability over all thresholds. \\
+& When it's useful & Good for probabilistic models; not sensitive to threshold. \\
+& Viable metric?   & \textbf{No}, since the data is strongly imbalanced. \\
+\midrule
+\textbf{PR AUC}
+& Description      & Average Precision. Area under Precision–Recall curve. \\
+\textbf{PR AUC}
+& When it's useful & Better than ROC AUC for imbalanced data, especially when pos. events are rare. \\
+& Viable metric?   & \textbf{Yes}, as the model consists largely of negative events. Seen later in section \ref{sec:empirical}. \\
+
+\end{xltabular}
+
+\subsection{Baseline Performance}
+
+\subsubsection{Why majority class classifier is not ideal}
+
+A simple baseline classifier could be defined to predict the majority class. By extending the \emph{BaselineClassifier} for Multiple outputs, we realize that the majority class over all audio event is actually, that no class is predicted at all. The scores of this classifier are shown in \autoref{tab:scores-maj}. For the baseline metrics, the whole dataset has been taken into account.
+
+
+\begin{table}[hb]
+\centering
+\caption{Scores for the majority class baseline classifier} \label{tab:scores-maj}
+\begin{tabularx}{\textwidth}{lX}
+    \toprule
+    \textbf{Macro Avg. Bal. Accuracy} & $0.5$ \\
+    \textbf{Macro F1 Score} & $0$ (or undefined, because there are no true positives, only true negatives.) \\
+    \textbf{PR AUC} & $0.0680$
+    %\textbf{Macro Avg Accuracy} & $0.93$ (\autoref{tab:metrics} explains, why this is not a sensible metric) \\
+\end{tabularx}
+\end{table}
+
+\subsubsection{Empirical Class Frequency Classifier}\label{sec:empirical}
+
+\begin{wrapfigure}[14]{r}{0.5\textwidth}
+    \centering
+    \vspace*{-10pt}
+    \includegraphics[width=\linewidth]{freq}
+    \caption{Probabilities for each class to be predicted, based on the class-frequency in the training data}
+    \label{fig:freq}
+\end{wrapfigure}
+
+ The task description suggests taking class frequencies into account and make predictions based on this. For this, the baseline classifier has been extended. The classifier does not just predict the majority class, but takes the mean of how often each class occurs. Upon prediction, a class has a probability of occurring in the binary output vector based on frequency in the training set. \autoref{fig:freq} shows the probabilities for each class to be predicted from a sample in the validation set. The red line indicates where the original majority class baseline classifier would have sampled for a prediction; so in this case all zeros. The scores of this classifier are shown in \autoref{tab:scores-freq}.
+
+\begin{table}[h]
+\captionsetup{justification=raggedright,singlelinecheck=false}
+\caption{Scores for the class frequency baseline classifier} \label{tab:scores-freq}
+\begin{tabularx}{0.48\textwidth}{lX}
+    \toprule
+    \textbf{Macro Avg. Bal. Accuracy} & $0.5004$ \\
+    \textbf{Macro F1 Score}           & $0.0653$ \\
+    \textbf{PR AUC}                   & $0.0668$ \\
+\end{tabularx}
+\end{table}
+
+It can be seen, that the F1 score has slightly increased, meaning the baseline classifier now predicts at least a few true positives. The equivalent builtin baseline classifier in sklearn is \lstinline{DummyClassifier()} with the \emph{stratified} strategy, which yields the same results as shown above. Let these results be the baseline performance to compare other classifiers with. 
+
+\section{Experiments}
+
+The performance criterion to optimize the hyper parameters is chosen to be the \emph{F1 score}. For the Experiments, the \emph{Random Forest} classifier and a \emph{Light Gradient Boosting Machine} were selected. To evaluate which parameters perform best, a grid search was used to iterate over the combination of hyper parameters of each classifier\cite{gridsearch}. The data is split into $90\%$ training data and $10\%$ test data. The grid search performs a stratified\footnote{\emph{Stratified} meaning the cross validation is adapted to the class frequency. Better for imbalanced data as mentioned in \nameref{sec:data-split}} k-fold cross validation on the training data, therefor not manual split for the validation data was necessary. $k$ was chosen to be $5$.
+
+\subsection{Random Forest Classifier}
+
+This classifier was chosen, because it was suggested as a task in the classifier tutorial. It was reasonably fast to train, even on the whole dataset, which simplified the procedure. The most relevant hyper parameters of the random forest classifier are defined as follows:
+
+\begin{itemize}[nolistsep,noitemsep]
+    \item \textbf{n\_estimators}: Number of trees in the forest.
+    \item \textbf{max\_depth}: Maximum depth of a tree.
+    \item \textbf{min\_samples\_split}: The minimum number of samples required to split an internal node
+\end{itemize}
+
+To systematically find the optimal hyperparameter vector, $20\%$ of the dataset were used for the grid search. How the performance changes in the hyperspace can be seen in \autoref{fig:rf-hyp-space}. The maximum training F1 score is $0.258$, for the hyperparameter vector:
+\textbf{n\_estimators} $=5$,
+\textbf{min\_samples\_split} $=5$,
+\textbf{max\_depth} $=20$.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=\linewidth]{rf-hyp-tuning}
+    \caption{Hyperparameter Space of the random forest classifier. The darkest hyper parameter vector is chosen as the best model}
+    \label{fig:rf-hyp-space}
+\end{figure}
+
+Following these trends, a higher max\_depth would indicate an even better performance. However, the training would be even more computationally expensive, so these parameters were accepted. It is interesting, that a lower number of total estimators perform better, which could be reasoned woth overfitting.
+
+The determined parameters were then used to train the random forest classifier with the whole dataset. The prediction score on the unbiased test set is shown in \autoref{tab:scores-rf}. A significant improvement can be seen in relation to the baseline performance.
+
+\begin{table}[hb]
+\centering
+\caption{Scores for the random forest classifier predicting the unbiased test set} \label{tab:scores-rf}
+\begin{tabularx}{\textwidth}{lXXX}
+    \toprule
+     & Model & Baseline & Improvement Factor \\ \midrule
+    \textbf{Macro Avg. Bal. Accuracy} & $0.6334$ & $0.5004$ & $1.27$ \\
+    \textbf{Macro F1 Score}           & $0.3735$ & $0.0653$ & $5.72$ \\
+    \textbf{PR AUC}                   & $0.2589$ & $0.0668$ & $3.88$ \\
+    \bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Gradient Boosting Machine}
+
+Initially, we tried out Support Vector Machines, however a Non-Linear SVM took to long to train and the linear SVM performed very poorly, which is why we tried the Gradient Boosting Machine (GBM)\cite{lgbm} in this section. The most relevant hyper parameters of the GBM classifier are defined as follows:
+
+\begin{itemize}[nolistsep,noitemsep]
+    \item \textbf{n\_estimators}: Number of boosted trees to fit.
+    \item \textbf{max\_depth}:  Maximum tree depth for base learners.
+    \item \textbf{learning\_rate}: The minimum number of samples required to split an internal node
+\end{itemize}
+
+To systematically find the optimal hyperparameter vector, $20\%$ of the dataset were used for the grid search. How the performance changes in the hyperspace can be seen in \autoref{fig:rf-hyp-space}. The maximum training F1 score is $0.526$, for the hyperparameter vector:
+\textbf{n\_estimators} $=100$,
+\textbf{learning\_rate} $=0.1$,
+\textbf{max\_depth} $=30$.
+
+As expected, a higher number of estimators as well as deeper trees perform better. 
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=\linewidth]{lgbm-hyp-tuning}
+    \caption{Hyperparameter Space of the GBM classifier. The darkest hyper parameter vector is chosen as the best model} \label{fig:lgbm-hyp-space}
+\end{figure}
+
+The determined parameters were then used to train the GBM classifier with the whole dataset. The prediction score on the unbiased test set is shown in \autoref{tab:scores-lgbm}. Again, a significant improvement can be seen in relation to the baseline performance, and a little improvement to the random forest classifier.
+
+\begin{table}[htb]
+\centering
+\caption{Scores for the gradient boosting machine classifier predicting the unbiased test set} \label{tab:scores-lgbm}
+\begin{tabularx}{\textwidth}{lXXX}
+    \toprule
+     & Model & Baseline & Improvement Factor \\ \midrule
+    \textbf{Macro Avg. Bal. Accuracy} & $0.8391$ & $0.5004$ & $1.68$ \\
+    \textbf{Macro F1 Score}           & $0.5113$ & $0.0653$ & $7.91$ \\
+    \textbf{PR AUC}                   & $0.3298$ & $0.0668$ & $4.95$ \\
+    \bottomrule
+\end{tabularx}
+\end{table}
+
+\newpage
+\section{Case Study and Reflection}
+
+Two Test files were picked out and predicted with the \emph{random forest classifier}, which can be seen in \autoref{fig:rf-case-study}. How the classifier performed can be seen in the respective figure description.
+
+\begin{figure}[ht]
+\begin{subfigure}{\textwidth}
+    \centering
+    \includegraphics[width=0.95\linewidth]{case-study-rf-001027}
+    \caption{Here, the classifier performed a good prediction. Description: I was typing on my keyboard, then my phone alarm rang (File ID: 001027)}
+    \label{fig:rf-case-001027}
+\end{subfigure}\vspace{11pt}
+\begin{subfigure}{\textwidth}
+    \centering
+    \includegraphics[width=0.95\linewidth]{case-study-rf-001582}
+    \caption{Here the classifier confused a light-switch with a keyboard. The light switch is a very rare class in comparison to the keyboard typing and also sounds very similar. The footsteps are also very poorly predicted. Description: I walked the the light switch, turned it on, moved the chair near me, started writing on my keyboard and clicked the mouse. (File ID: 001582)}
+    \label{fig:rf-case-002862}
+\end{subfigure}
+\caption{Two Testfiles}\label{fig:rf-case-study}
+\end{figure}
+
+\subsection{Reflection}
+
+For comparison, a selection of per class confusion matrices can be seen for each classifier in \autoref{fig:confusion}. From the low number overall positive predictions by the random forest classifier, on can see, that it predicts way more conservative as the GBM classifier. GBM predicts more positive events, consequently leading to a stronger false positive rate for e.g. footsteps. This could be because of class imbalance, as it is the most frequent class (compare \autoref{fig:freq}). The other dominating class \emph{running water} however, seems to be predicted more reliably.
+
+\begin{figure}[htb]
+\begin{subfigure}{\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{confusion-rf}
+    \caption{Confusion matrices from the random forest classifier}
+\end{subfigure}\vspace{11pt}
+\begin{subfigure}{\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{confusion-lgbm}
+    \caption{Confusion matrices from the GBM classifier}
+\end{subfigure}
+\begin{subfigure}{\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{confusion-baseline}
+    \caption{Confusion matrices from the class frequency baseline classifier}\label{fig:confusion-baseline}
+\end{subfigure}
+\caption{Selection of per class confusion matrices for each classifier}\label{fig:confusion}
+\end{figure}
+
+Both the random forest as well as the GBM classifier show improvement to the baseline confusion rates, as seen in \autoref{fig:confusion-baseline}.
+
+
+\input{llm-disclosure}
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\end{document}

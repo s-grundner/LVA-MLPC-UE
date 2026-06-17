@@ -1,0 +1,18 @@
+[submodule "DataExploration/report"]
+	path = DataExploration/report
+	url = https://git@git.overleaf.com/69d661eadd6ba0f8a3b4998e
+[submodule "Challenge/report"]
+	path = Challenge/report
+	url = https://git@git.overleaf.com/6a3136a7b1585cfbea474ab4
+[submodule "Challenge/slides"]
+	path = Challenge/slides
+	url = https://git@git.overleaf.com/6a3136b9c31ea56f237ec5b7
+[submodule "DataClassification/report"]
+	path = DataClassification/report
+	url = https://git@git.overleaf.com/69ef6cf7ef5ed6c65ad84b6d
+[submodule "DataClassification/slides"]
+	path = DataClassification/slides
+	url = https://git@git.overleaf.com/69ef6e64b6bf0e9f15da5d3b
+[submodule "DataExploration/slides"]
+	path = DataExploration/slides
+	url = https://git@git.overleaf.com/69e10427239cd82c51aca0cd

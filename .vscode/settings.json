@@ -11,8 +11,12 @@
         "**/*.aux" : true,
         "**/*.out" : true,
         "**/*.log" : true,
+        "**/*.nav" : true,
+        "**/*.snm" : true,
+        "**/*.sty" : true,
         "**/*.synctex.gz" : true,
         "**/*.toc" : true,
+        "**/LICENSE" : true,
         "**/*.run.xml" : true,
     }
 }
